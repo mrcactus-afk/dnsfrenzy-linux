@@ -2,7 +2,7 @@
 set -e
 dnf install -y jq bind-utils
 mkdir -p /opt/dnsfrenzy /var/log/dnsfrenzy /var/cache/dnsfrenzy
-cat > /opt/dnsfrenzy/config.json << 'CFG'
+cat > /opt/dnsfrenzy/config.json << 'CFG_EOF'
 {
     "interval": 30,
     "http_test": false,
@@ -19,19 +19,19 @@ cat > /opt/dnsfrenzy/config.json << 'CFG'
     "fallback_primary": "1.1.1.1",
     "fallback_secondary": "1.0.0.1",
     "servers": [
-        {"name":"Radar","primary":"10.202.10.10","secondary":"10.202.10.11"},
-        {"name":"403","primary":"10.202.10.202","secondary":"10.202.10.102"},
-        {"name":"Begzar","primary":"185.55.226.26","secondary":"185.55.225.25"},
-        {"name":"LagSlayer","primary":"5.160.132.222","secondary":"5.160.132.221"},
-        {"name":"Shelter","primary":"94.103.125.158","secondary":"94.103.125.157"},
-        {"name":"LagZero","primary":"95.38.132.152","secondary":"95.38.132.153"},
-        {"name":"Electro","primary":"78.157.42.100","secondary":"78.157.42.101"},
-        {"name":"Lag Zero","primary":"95.38.132.153","secondary":"95.38.132.152"},
-        {"name":"Mokhaberat","primary":"217.218.127.127","secondary":"217.218.155.155"}
+        { "name": "Radar", "primary": "10.202.10.10", "secondary": "10.202.10.11" },
+        { "name": "403", "primary": "10.202.10.202", "secondary": "10.202.10.102" },
+        { "name": "Begzar", "primary": "185.55.226.26", "secondary": "185.55.225.25" },
+        { "name": "LagSlayer", "primary": "5.160.132.222", "secondary": "5.160.132.221" },
+        { "name": "Shelter", "primary": "94.103.125.158", "secondary": "94.103.125.157" },
+        { "name": "LagZero", "primary": "95.38.132.152", "secondary": "95.38.132.153" },
+        { "name": "Electro", "primary": "78.157.42.100", "secondary": "78.157.42.101" },
+        { "name": "Lag Zero", "primary": "95.38.132.153", "secondary": "95.38.132.152" },
+        { "name": "Mokhaberat", "primary": "217.218.127.127", "secondary": "217.218.155.155" }
     ]
 }
-CFG
-cat > /opt/dnsfrenzy/dnsfrenzy.sh << 'SCR'
+CFG_EOF
+cat > /opt/dnsfrenzy/dnsfrenzy.sh << 'SCRIPT_EOF'
 #!/bin/bash
 CONFIG="/opt/dnsfrenzy/config.json"
 CACHE="/var/cache/dnsfrenzy/best.json"
@@ -60,7 +60,8 @@ if [ -f "$BLACKLIST_FILE" ]; then
     done < <(jq -c '.[]' "$BLACKLIST_FILE" 2>/dev/null)
 fi
 is_blacklisted() {
-    local ip="$1"; local until=${BLACKLIST[$ip]}
+    local ip="$1"
+    local until=${BLACKLIST[$ip]}
     if [ -n "$until" ] && [ "$(date +%s)" -lt "$until" ]; then return 0; else unset BLACKLIST[$ip]; return 1; fi
 }
 test_latency() {
@@ -69,7 +70,8 @@ test_latency() {
     if [ "$HTTP_TEST" = "true" ]; then
         local start=$(date +%s%N)
         curl -s -o /dev/null --connect-timeout "$HTTP_TIMEOUT" --max-time "$HTTP_TIMEOUT" "$HTTP_URL" --dns-servers "$ip" 2>/dev/null > /dev/null
-        local exit_code=$?; local end=$(date +%s%N)
+        local exit_code=$?
+        local end=$(date +%s%N)
         if [ $exit_code -eq 0 ]; then local elapsed=$(( (end - start) / 1000000 )); echo "$elapsed"; else echo "99999"; fi
     else
         local result=$(ping -c 2 -W 1 "$ip" 2>/dev/null | tail -1 | awk -F '/' '{print $5}')
@@ -112,7 +114,8 @@ get_best_dns() {
     if [ -z "$best_primary" ]; then
         best_primary=$(jq -r '.fallback_primary' "$CONFIG")
         best_secondary=$(jq -r '.fallback_secondary' "$CONFIG")
-        best_name="Fallback"; best_latency=99999
+        best_name="Fallback"
+        best_latency=99999
     fi
     log "Best: $best_name ($best_primary) - ${best_latency}ms"
     echo "{\"primary\":\"$best_primary\",\"secondary\":\"$best_secondary\",\"name\":\"$best_name\",\"latency\":$best_latency,\"timestamp\":\"$(date -Iseconds)\"}" > "$CACHE"
@@ -126,9 +129,11 @@ apply_dns() {
     if [ "$MULTI_INTERFACE" = "true" ]; then
         for iface in $(ip link show | grep -E '^[0-9]+: (en|wl)' | awk -F': ' '{print $2}'); do
             resolvectl dns "$iface" "$primary" "$secondary" 2>/dev/null
+            log "Applied to interface $iface"
         done
     else
         resolvectl dns "$primary" "$secondary" 2>/dev/null
+        log "Applied to system"
     fi
     resolvectl domain ~. 2>/dev/null
     if [ "$EXPORT_RESOLV" = "true" ]; then
@@ -138,6 +143,9 @@ apply_dns() {
     fi
     log "Applied DNS: $name ($primary / $secondary) - ${latency}ms"
 }
+get_current_system_dns() {
+    resolvectl status 2>/dev/null | grep -E "DNS Servers:" | head -1 | awk '{print $NF}'
+}
 log "DNSFrenzy v1.1.1 started"
 while true; do
     output=$(get_best_dns | tail -n1)
@@ -145,17 +153,17 @@ while true; do
     secondary=$(echo "$output" | cut -d'|' -f2)
     name=$(echo "$output" | cut -d'|' -f3)
     latency=$(echo "$output" | cut -d'|' -f4)
-    current=$(jq -r '.primary' "$CACHE" 2>/dev/null || echo "none")
-    if [[ "$primary" != "$current" ]]; then
+    current_system=$(get_current_system_dns)
+    if [[ "$primary" != "$current_system" ]]; then
         apply_dns "$primary" "$secondary" "$name" "$latency"
     else
         log "No change – $name still best (${latency}ms)"
     fi
     sleep "$INTERVAL"
 done
-SCR
+SCRIPT_EOF
 chmod +x /opt/dnsfrenzy/dnsfrenzy.sh
-cat > /usr/local/bin/dnsfrenzy << 'CMD'
+cat > /usr/local/bin/dnsfrenzy << 'CMD_EOF'
 #!/bin/bash
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 VERSION=$(cat /opt/dnsfrenzy/VERSION 2>/dev/null || echo "1.1.1")
@@ -214,9 +222,9 @@ case "$1" in
     help|--help|-h) show_help ;;
     *) echo -e "${RED}❌ Unknown command: $1${NC}"; show_help ;;
 esac
-CMD
+CMD_EOF
 chmod +x /usr/local/bin/dnsfrenzy
-cat > /etc/systemd/system/dnsfrenzy.service << 'SVC'
+cat > /etc/systemd/system/dnsfrenzy.service << 'SVC_EOF'
 [Unit]
 Description=ShadowKit DNSFrenzy Daemon
 After=network.target
@@ -229,8 +237,8 @@ StandardOutput=append:/var/log/dnsfrenzy/dnsfrenzy.log
 StandardError=append:/var/log/dnsfrenzy/dnsfrenzy.log
 [Install]
 WantedBy=multi-user.target
-SVC
-cat > /usr/local/bin/dnsfrenzy-uninstall << 'UNI'
+SVC_EOF
+cat > /usr/local/bin/dnsfrenzy-uninstall << 'UNINST_EOF'
 #!/bin/bash
 systemctl disable --now dnsfrenzy 2>/dev/null
 rm /etc/systemd/system/dnsfrenzy.service
@@ -238,9 +246,9 @@ rm /usr/local/bin/dnsfrenzy
 rm -rf /opt/dnsfrenzy /var/log/dnsfrenzy /var/cache/dnsfrenzy
 systemctl daemon-reload
 echo "DNSFrenzy removed."
-UNI
+UNINST_EOF
 chmod +x /usr/local/bin/dnsfrenzy-uninstall
-cat > /usr/local/bin/dnsfrenzy-packager << 'PKG'
+cat > /usr/local/bin/dnsfrenzy-packager << 'PKG_EOF'
 #!/bin/bash
 VERSION=$(cat /opt/dnsfrenzy/VERSION 2>/dev/null || echo "1.1.1")
 mkdir -p /tmp/dnsfrenzy-pkg/opt /tmp/dnsfrenzy-pkg/usr/local/bin /tmp/dnsfrenzy-pkg/etc/systemd/system
@@ -248,7 +256,7 @@ cp -r /opt/dnsfrenzy /tmp/dnsfrenzy-pkg/opt
 cp /usr/local/bin/dnsfrenzy /tmp/dnsfrenzy-pkg/usr/local/bin/
 cp /etc/systemd/system/dnsfrenzy.service /tmp/dnsfrenzy-pkg/etc/systemd/system/
 mkdir -p /tmp/dnsfrenzy-pkg/DEBIAN
-cat > /tmp/dnsfrenzy-pkg/DEBIAN/control << CTL
+cat > /tmp/dnsfrenzy-pkg/DEBIAN/control << PKG
 Package: dnsfrenzy
 Version: $VERSION
 Section: net
@@ -257,13 +265,13 @@ Architecture: all
 Depends: jq, bind-utils
 Maintainer: Your Name <you@example.com>
 Description: ShadowKit DNSFrenzy Linux port - automatic DNS switching with real latency testing.
-CTL
+PKG
 dpkg-deb --root-owner-group --build /tmp/dnsfrenzy-pkg /tmp/dnsfrenzy-$VERSION.deb 2>/dev/null || dpkg-deb --build /tmp/dnsfrenzy-pkg /tmp/dnsfrenzy-$VERSION.deb 2>/dev/null
 if command -v fpm &>/dev/null; then
     fpm -s dir -t rpm -n dnsfrenzy -v $VERSION --prefix / -C /tmp/dnsfrenzy-pkg . 2>/dev/null
 fi
 echo "Package built: /tmp/dnsfrenzy-$VERSION.deb"
-PKG
+PKG_EOF
 chmod +x /usr/local/bin/dnsfrenzy-packager
 echo "1.1.1" > /opt/dnsfrenzy/VERSION
 systemctl daemon-reload
