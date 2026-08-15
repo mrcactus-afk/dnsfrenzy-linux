@@ -1,1 +1,27 @@
-{"interval":30,"servers":[{"name":"example","primary":"1.1.1.1","secondary":"1.0.0.1"}]}
+{
+    "interval": 30,
+    "http_test": false,
+    "http_timeout": 3,
+    "http_url": "",
+    "smart_mix": true,
+    "fallback_chain": true,
+    "blacklist_threshold": 3,
+    "blacklist_duration": 300,
+    "multi_interface": true,
+    "export_resolv": true,
+    "log_history": true,
+    "history_file": "/var/log/dnsfrenzy/history.jsonl",
+    "fallback_primary": "1.1.1.1",
+    "fallback_secondary": "1.0.0.1",
+    "servers": [
+        { "name": "Radar", "primary": "10.202.10.10", "secondary": "10.202.10.11" },
+        { "name": "403", "primary": "10.202.10.202", "secondary": "10.202.10.102" },
+        { "name": "Begzar", "primary": "185.55.226.26", "secondary": "185.55.225.25" },
+        { "name": "LagSlayer", "primary": "5.160.132.222", "secondary": "5.160.132.221" },
+        { "name": "Shelter", "primary": "94.103.125.158", "secondary": "94.103.125.157" },
+        { "name": "LagZero", "primary": "95.38.132.152", "secondary": "95.38.132.153" },
+        { "name": "Electro", "primary": "78.157.42.100", "secondary": "78.157.42.101" },
+        { "name": "Lag Zero", "primary": "95.38.132.153", "secondary": "95.38.132.152" },
+        { "name": "Mokhaberat", "primary": "217.218.127.127", "secondary": "217.218.155.155" }
+    ]
+}
