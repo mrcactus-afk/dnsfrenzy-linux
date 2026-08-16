@@ -1,0 +1,23 @@
+# Build artifacts
+*.rpm
+*.deb
+/tmp/
+
+# Runtime/generated files
+config.json
+*.log
+/var/*
+*.cache
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor backups
+*~
+*.swp
+*.swo
+
+# Local overrides
+install.local.sh
+.env

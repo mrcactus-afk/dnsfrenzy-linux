@@ -166,7 +166,7 @@ chmod +x /opt/dnsfrenzy/dnsfrenzy.sh
 cat > /usr/local/bin/dnsfrenzy << 'CMD_EOF'
 #!/bin/bash
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
-VERSION=$(cat /opt/dnsfrenzy/VERSION 2>/dev/null || echo "1.1.1")
+VERSION=$(cat /opt/dnsfrenzy/VERSION 2>/dev/null || echo "1.2.0")
 show_help() { cat << HELP
 ${BOLD}${CYAN}╔══════════════════════════════════════════════════════════════════╗
 ║              SHADOWKIT DNSFRENZY – Management Tool              ║
@@ -250,7 +250,7 @@ UNINST_EOF
 chmod +x /usr/local/bin/dnsfrenzy-uninstall
 cat > /usr/local/bin/dnsfrenzy-packager << 'PKG_EOF'
 #!/bin/bash
-VERSION=$(cat /opt/dnsfrenzy/VERSION 2>/dev/null || echo "1.1.1")
+VERSION=$(cat /opt/dnsfrenzy/VERSION 2>/dev/null || echo "1.2.0")
 mkdir -p /tmp/dnsfrenzy-pkg/opt /tmp/dnsfrenzy-pkg/usr/local/bin /tmp/dnsfrenzy-pkg/etc/systemd/system
 cp -r /opt/dnsfrenzy /tmp/dnsfrenzy-pkg/opt
 cp /usr/local/bin/dnsfrenzy /tmp/dnsfrenzy-pkg/usr/local/bin/
@@ -273,7 +273,7 @@ fi
 echo "Package built: /tmp/dnsfrenzy-$VERSION.deb"
 PKG_EOF
 chmod +x /usr/local/bin/dnsfrenzy-packager
-echo "1.1.1" > /opt/dnsfrenzy/VERSION
+echo "1.2.0" > /opt/dnsfrenzy/VERSION
 systemctl daemon-reload
 systemctl enable --now dnsfrenzy
 echo -e "\n\033[0;32m✅ ShadowKit DNSFrenzy v1.1.1 installed successfully.\033[0m"

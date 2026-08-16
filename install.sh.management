@@ -1,0 +1,83 @@
+#!/bin/bash
+VERSION=$(cat /opt/dnsfrenzy/VERSION 2>/dev/null || echo "1.2.0")
+
+# Color definitions using tput for reliability
+if command -v tput >/dev/null 2>&1 && [ -t 1 ]; then
+    RED=$(tput setaf 1)
+    GREEN=$(tput setaf 2)
+    YELLOW=$(tput setaf 3)
+    BLUE=$(tput setaf 4)
+    CYAN=$(tput setaf 6)
+    BOLD=$(tput bold)
+    NC=$(tput sgr0)
+else
+    RED=""; GREEN=""; YELLOW=""; BLUE=""; CYAN=""; BOLD=""; NC=""
+fi
+
+show_help() {
+    echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════════════════════╗"
+    echo -e "║              SHADOWKIT DNSFRENZY – Management Tool              ║"
+    echo -e "╚══════════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${BOLD}Usage:${NC} dnsfrenzy ${BOLD}<command>${NC}"
+    echo -e "${BOLD}Commands:${NC}"
+    echo -e "  ${GREEN}start${NC}     Start the daemon"
+    echo -e "  ${GREEN}stop${NC}      Stop the daemon"
+    echo -e "  ${GREEN}restart${NC}   Restart the daemon"
+    echo -e "  ${GREEN}status${NC}    Show detailed status"
+    echo -e "  ${GREEN}enable${NC}    Enable at boot"
+    echo -e "  ${GREEN}disable${NC}   Disable at boot"
+    echo -e "  ${GREEN}logs${NC}      Tail the log file"
+    echo -e "  ${GREEN}config${NC}    Edit config (nano)"
+    echo -e "  ${GREEN}reload${NC}    Reload after config change"
+    echo -e "  ${GREEN}version${NC}   Show version"
+    echo -e "  ${GREEN}help${NC}      Show this help"
+}
+
+show_status() {
+    echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}${BOLD}║              DNSFRENZY – SYSTEM STATUS                         ║${NC}"
+    echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════════════════════╝${NC}"
+    if systemctl is-active --quiet dnsfrenzy; then STATUS="${GREEN}● Running${NC}"; else STATUS="${RED}● Stopped${NC}"; fi
+    if systemctl is-enabled --quiet dnsfrenzy 2>/dev/null; then ENABLED="${GREEN}Yes${NC}"; else ENABLED="${RED}No${NC}"; fi
+    UPTIME=$(systemctl show dnsfrenzy --property=ActiveEnterTimestamp --no-pager 2>/dev/null | cut -d= -f2); [ -z "$UPTIME" ] && UPTIME="N/A"
+    CACHE="/var/cache/dnsfrenzy/best.json"
+    if [ -f "$CACHE" ]; then
+        PRIMARY=$(jq -r '.primary' "$CACHE" 2>/dev/null || echo "N/A")
+        SECONDARY=$(jq -r '.secondary' "$CACHE" 2>/dev/null || echo "N/A")
+        NAME=$(jq -r '.name' "$CACHE" 2>/dev/null || echo "N/A")
+        LATENCY=$(jq -r '.latency' "$CACHE" 2>/dev/null || echo "N/A")
+        TIMESTAMP=$(jq -r '.timestamp' "$CACHE" 2>/dev/null || echo "N/A")
+    else
+        PRIMARY="N/A"; SECONDARY="N/A"; NAME="N/A"; LATENCY="N/A"; TIMESTAMP="N/A"
+    fi
+    echo -e "\n${BOLD}Version:${NC}      $VERSION"
+    echo -e "${BOLD}Status:${NC}       $STATUS"
+    echo -e "${BOLD}Boot enable:${NC}  $ENABLED"
+    echo -e "${BOLD}Uptime:${NC}       $UPTIME\n"
+    echo -e "${CYAN}─── Best DNS ───${NC}"
+    echo -e "  ${BOLD}Name:${NC}        $NAME"
+    echo -e "  ${BOLD}Primary:${NC}     $PRIMARY"
+    echo -e "  ${BOLD}Secondary:${NC}   $SECONDARY"
+    echo -e "  ${BOLD}Latency:${NC}     ${YELLOW}${LATENCY}ms${NC}"
+    echo -e "  ${BOLD}Cached:${NC}      $TIMESTAMP\n"
+    echo -e "${CYAN}─── Recent Log (last 3 lines) ───${NC}"
+    tail -n 3 /var/log/dnsfrenzy/dnsfrenzy.log 2>/dev/null | while read line; do
+        echo -e "  ${BLUE}$line${NC}"
+    done || echo -e "  ${YELLOW}No log entries yet${NC}"
+    echo -e "${CYAN}────────────────────────────────────────────────────────────────────${NC}"
+}
+
+case "$1" in
+    start)   systemctl start dnsfrenzy && echo -e "${GREEN}✅ Started${NC}" ;;
+    stop)    systemctl stop dnsfrenzy && echo -e "${RED}⏹ Stopped${NC}" ;;
+    restart) systemctl restart dnsfrenzy && echo -e "${GREEN}🔄 Restarted${NC}" ;;
+    status)  show_status ;;
+    enable)  systemctl enable --now dnsfrenzy && echo -e "${GREEN}✅ Enabled at boot${NC}" ;;
+    disable) systemctl disable --now dnsfrenzy && echo -e "${RED}❌ Disabled at boot${NC}" ;;
+    logs)    tail -f /var/log/dnsfrenzy/dnsfrenzy.log ;;
+    config)  nano /etc/dnsfrenzy/config.json ;;
+    reload)  systemctl restart dnsfrenzy && echo -e "${GREEN}🔄 Reloaded${NC}" ;;
+    version) echo -e "${CYAN}DNSFrenzy version ${BOLD}$VERSION${NC}" ;;
+    help|--help|-h) show_help ;;
+    *) echo -e "${RED}❌ Unknown command: $1${NC}"; show_help ;;
+esac

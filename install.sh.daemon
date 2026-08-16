@@ -1,0 +1,235 @@
+#!/bin/bash
+CONFIG="/etc/dnsfrenzy/config.json"
+DEFAULT_CONFIG="/opt/dnsfrenzy/config.json"
+CACHE="/var/cache/dnsfrenzy/best.json"
+HISTORY="/var/log/dnsfrenzy/history.jsonl"
+LOG="/var/log/dnsfrenzy/dnsfrenzy.log"
+BLACKLIST_FILE="/var/cache/dnsfrenzy/blacklist.json"
+RESOLV_CONF="/etc/resolv.conf.dnsfrenzy.tmp"
+HEALTH_FILE="/var/run/dnsfrenzy/health"
+PIDFILE="/var/run/dnsfrenzy.pid"
+
+mkdir -p /var/run/dnsfrenzy
+
+if [ ! -f "$CONFIG" ]; then
+    mkdir -p /etc/dnsfrenzy
+    cp "$DEFAULT_CONFIG" "$CONFIG"
+fi
+
+log() {
+    local msg="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "$timestamp - $msg" >> "$LOG"
+    if [ "$USE_SYSLOG" = "true" ]; then
+        logger -t dnsfrenzy "$msg"
+    fi
+}
+
+trap 'log "Received SIGTERM, shutting down"; rm -f "$HEALTH_FILE" "$PIDFILE"; exit 0' TERM
+trap 'log "Received SIGINT, shutting down"; rm -f "$HEALTH_FILE" "$PIDFILE"; exit 0' INT
+
+echo $$ > "$PIDFILE"
+
+INTERVAL=$(jq -r '.interval' "$CONFIG")
+HTTP_TEST=$(jq -r '.http_test' "$CONFIG")
+HTTP_URL=$(jq -r '.http_url' "$CONFIG")
+HTTP_TIMEOUT=$(jq -r '.http_timeout' "$CONFIG")
+SMART_MIX=$(jq -r '.smart_mix' "$CONFIG")
+FALLBACK_CHAIN=$(jq -r '.fallback_chain' "$CONFIG")
+BLACKLIST_THRESHOLD=$(jq -r '.blacklist_threshold' "$CONFIG")
+BLACKLIST_DURATION=$(jq -r '.blacklist_duration' "$CONFIG")
+MULTI_INTERFACE=$(jq -r '.multi_interface' "$CONFIG")
+EXPORT_RESOLV=$(jq -r '.export_resolv' "$CONFIG")
+LOG_HISTORY=$(jq -r '.log_history' "$CONFIG")
+USE_SYSLOG=$(jq -r '.use_syslog // false' "$CONFIG")
+IPv6_ENABLED=$(jq -r '.ipv6_enabled // false' "$CONFIG")
+
+declare -A BLACKLIST
+if [ -f "$BLACKLIST_FILE" ]; then
+    while IFS= read -r line; do
+        ip=$(echo "$line" | jq -r '.ip')
+        until=$(echo "$line" | jq -r '.until')
+        BLACKLIST["$ip"]=$until
+    done < <(jq -c '.[]' "$BLACKLIST_FILE" 2>/dev/null)
+fi
+
+is_blacklisted() {
+    local ip="$1"
+    local until=${BLACKLIST[$ip]}
+    if [ -n "$until" ] && [ "$(date +%s)" -lt "$until" ]; then
+        return 0
+    else
+        unset BLACKLIST[$ip]
+        return 1
+    fi
+}
+
+test_latency() {
+    local ip="$1"
+    if is_blacklisted "$ip"; then echo "99999"; return; fi
+    if [ "$HTTP_TEST" = "true" ]; then
+        local start=$(date +%s%N)
+        curl -s -o /dev/null --connect-timeout "$HTTP_TIMEOUT" --max-time "$HTTP_TIMEOUT" "$HTTP_URL" --dns-servers "$ip" 2>/dev/null > /dev/null
+        local exit_code=$?
+        local end=$(date +%s%N)
+        if [ $exit_code -eq 0 ]; then
+            local elapsed=$(( (end - start) / 1000000 ))
+            echo "$elapsed"
+        else
+            echo "99999"
+        fi
+    else
+        local result=$(ping -c 2 -W 1 "$ip" 2>/dev/null | tail -1 | awk -F '/' '{print $5}')
+        if [[ -z "$result" || "$result" == "" ]]; then
+            echo "99999"
+        else
+            printf "%.0f" "$result" 2>/dev/null | cut -d. -f1 || echo "99999"
+        fi
+    fi
+}
+
+get_active_interfaces() {
+    local interfaces=""
+    if [ "$MULTI_INTERFACE" = "true" ]; then
+        interfaces=$(ip link show | grep -E '^[0-9]+: (en|wl|tun|wg)' | awk -F': ' '{print $2}')
+    else
+        interfaces=$(ip route | grep default | awk '{print $5}' | head -1)
+    fi
+    echo "$interfaces"
+}
+
+get_current_dns() {
+    # Get global DNS first, else per-interface
+    local global_dns=$(resolvectl status 2>/dev/null | grep -A1 "Global" | grep "DNS Servers:" | head -1 | awk '{print $NF}')
+    if [ -n "$global_dns" ] && [ "$global_dns" != " " ]; then
+        echo "$global_dns"
+    else
+        # fallback to first interface
+        local iface=$(get_active_interfaces | head -1)
+        if [ -n "$iface" ]; then
+            resolvectl status "$iface" 2>/dev/null | grep -E "DNS Servers:" | head -1 | awk '{print $NF}'
+        else
+            echo ""
+        fi
+    fi
+}
+
+apply_dns() {
+    local primary="$1"; local secondary="$2"; local name="$3"; local latency="$4"
+    # Set global DNS (applies to all interfaces unless overridden)
+    resolvectl dns "$primary" "$secondary" 2>/dev/null
+    resolvectl domain ~. 2>/dev/null
+
+    # Also set per-interface for explicit control
+    local interfaces=$(get_active_interfaces)
+    for iface in $interfaces; do
+        resolvectl dns "$iface" "$primary" "$secondary" 2>/dev/null
+        if [ "$IPv6_ENABLED" = "true" ]; then
+            resolvectl dns "$iface" "$primary" "$secondary" 2>/dev/null
+        fi
+        if [ "$(jq -r '.dns_over_tls // false' "$CONFIG")" = "true" ]; then
+            resolvectl dns-over-tls "$iface" yes
+        fi
+        if [ "$(jq -r '.dnssec // false' "$CONFIG")" = "true" ]; then
+            resolvectl dnssec "$iface" yes
+        fi
+        log "Applied to interface $iface"
+    done
+
+    if [ "$EXPORT_RESOLV" = "true" ]; then
+        echo "nameserver $primary" > "$RESOLV_CONF"
+        echo "nameserver $secondary" >> "$RESOLV_CONF"
+        cp "$RESOLV_CONF" /etc/resolv.conf 2>/dev/null || log "Could not update /etc/resolv.conf"
+    fi
+    log "Applied DNS: $name ($primary / $secondary) - ${latency}ms"
+    echo "healthy" > "$HEALTH_FILE"
+}
+
+get_best_dns() {
+    local best_primary=""; local best_secondary=""; local best_name="Fallback"
+    local second_primary=""; local second_secondary=""; local second_name=""
+    local best_latency=999999; local second_latency=999999
+    local servers=$(jq -c '.servers[]' "$CONFIG")
+    local scores=()
+
+    while IFS= read -r server; do
+        name=$(echo "$server" | jq -r '.name')
+        primary=$(echo "$server" | jq -r '.primary')
+        secondary=$(echo "$server" | jq -r '.secondary')
+        latency=$(test_latency "$primary")
+        log "Tested $name: ${latency}ms"
+        if [ "$latency" -lt 99999 ]; then
+            scores+=("$latency|$primary|$secondary|$name")
+        else
+            local fail_count=$(jq -r ".fail_count.\"$primary\" // 0" "$BLACKLIST_FILE" 2>/dev/null || echo "0")
+            fail_count=$((fail_count + 1))
+            if [ "$fail_count" -ge "$BLACKLIST_THRESHOLD" ]; then
+                until_time=$(( $(date +%s) + BLACKLIST_DURATION ))
+                BLACKLIST["$primary"]=$until_time
+                log "Blacklisted $primary until $(date -d @$until_time)"
+                jq ". + [{\"ip\":\"$primary\",\"until\":$until_time}]" "$BLACKLIST_FILE" 2>/dev/null | jq -s 'unique_by(.ip)' > "$BLACKLIST_FILE.tmp" && mv "$BLACKLIST_FILE.tmp" "$BLACKLIST_FILE"
+            fi
+        fi
+    done <<< "$servers"
+
+    IFS=$'\n' scores=($(sort -n -t '|' -k1 <<<"${scores[*]}"))
+    if [ ${#scores[@]} -ge 1 ]; then
+        IFS='|' read -r best_latency best_primary best_secondary best_name <<< "${scores[0]}"
+        if [ ${#scores[@]} -ge 2 ] && [ "$SMART_MIX" = "true" ]; then
+            IFS='|' read -r second_latency second_primary second_secondary second_name <<< "${scores[1]}"
+            best_secondary=$second_secondary
+        fi
+    fi
+
+    if [ -z "$best_primary" ]; then
+        best_primary=$(jq -r '.fallback_primary' "$CONFIG")
+        best_secondary=$(jq -r '.fallback_secondary' "$CONFIG")
+        best_name="Fallback"
+        best_latency=99999
+    fi
+
+    log "Best: $best_name ($best_primary) - ${best_latency}ms"
+    echo "{\"primary\":\"$best_primary\",\"secondary\":\"$best_secondary\",\"name\":\"$best_name\",\"latency\":$best_latency,\"timestamp\":\"$(date -Iseconds)\"}" > "$CACHE"
+    if [ "$LOG_HISTORY" = "true" ]; then
+        echo "{\"timestamp\":\"$(date -Iseconds)\",\"primary\":\"$best_primary\",\"secondary\":\"$best_secondary\",\"name\":\"$best_name\",\"latency\":$best_latency}" >> "$HISTORY"
+    fi
+    echo "$best_primary|$best_secondary|$best_name|$best_latency"
+}
+
+check_network_change() {
+    local last_state_file="/var/cache/dnsfrenzy/last_network_state"
+    local current_state=$(ip link show | grep -E '^[0-9]+: (en|wl)' | awk '{print $2}' | sort | md5sum)
+    if [ -f "$last_state_file" ]; then
+        local last_state=$(cat "$last_state_file")
+        if [ "$current_state" != "$last_state" ]; then
+            log "Network change detected, re-testing..."
+            return 0
+        fi
+    fi
+    echo "$current_state" > "$last_state_file"
+    return 1
+}
+
+log "DNSFrenzy v1.2.0 started (PID: $$)"
+echo "starting" > "$HEALTH_FILE"
+
+while true; do
+    if check_network_change; then
+        sleep 2
+    fi
+
+    output=$(get_best_dns | tail -n1)
+    primary=$(echo "$output" | cut -d'|' -f1)
+    secondary=$(echo "$output" | cut -d'|' -f2)
+    name=$(echo "$output" | cut -d'|' -f3)
+    latency=$(echo "$output" | cut -d'|' -f4)
+
+    current_system=$(get_current_dns)
+
+    if [[ "$primary" != "$current_system" ]]; then
+        apply_dns "$primary" "$secondary" "$name" "$latency"
+    else
+        log "No change – $name still best (${latency}ms)"
+    fi
+    sleep "$INTERVAL"
+done
