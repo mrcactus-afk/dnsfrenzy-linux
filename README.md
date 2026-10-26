@@ -1,16 +1,22 @@
-# DNSFrenzy – ShadowKit DNS Switching for Linux
+# DNSFrenzy
 
-**DNSFrenzy** is a fully automated, modular DNS switching daemon that continuously tests real latency and switches to the fastest DNS server.
+Fully automated, modular DNS switching daemon for Linux with real latency testing and network-change detection.
 
 ## Installation
-```bash
 curl -fsSL https://raw.githubusercontent.com/mrcactus-afk/dnsfrenzy-linux/main/install.sh | sudo bash
-```
 
 ## Usage
-```bash
-dnsfrenzy start|stop|status|logs|config|reload|version
-```
+sudo dnsfrenzy
 
-## License
-MIT
+## TUI Controls
+q = quit
+a = toggle auto/manual mode
++ / - = change refresh delay
+l = lock current DNS
+r = force refresh
+s = start/stop service
+c = edit config
+mouse click = select server
+
+## Uninstall
+sudo ./uninstall.sh

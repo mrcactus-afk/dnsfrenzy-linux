@@ -1,0 +1,8 @@
+[Unit]
+Description=DNSFrenzy DNS Evaluator
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/dnsfrenzy/dnsfrenzy.sh
+User=root

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run DNSFrenzy every 30 seconds
+Requires=dnsfrenzy.service
+
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=30s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
