@@ -22,3 +22,4 @@ Thumbs.db
 install.local.sh
 .env
 build/
+__pycache__/
