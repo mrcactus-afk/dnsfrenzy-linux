@@ -21,3 +21,4 @@ Thumbs.db
 # Local overrides
 install.local.sh
 .env
+build/
