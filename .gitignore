@@ -23,3 +23,12 @@ install.local.sh
 .env
 build/
 __pycache__/
+*.pyc
+*.pyo
+*.tmp
+*.bak
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pylint_cache/
+dist/

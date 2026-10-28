@@ -91,7 +91,6 @@ def _open_config_editor(config_path):
 
 def _is_valid_ip(ip):
     """Basic IPv4 validation"""
-    import re
 
     parts = ip.strip().split(".")
     if len(parts) != 4:
@@ -392,7 +391,7 @@ def main(stdscr):
         is_auto = mode_data.get("mode") == "auto"
         current_dns = cache.get("server", "None")
         current_latency = cache.get("latency", "N/A")
-        current_time = cache.get("time", "N/A")
+        cache.get("time", "N/A")
         is_locked = state.get("locked", False)
 
         vpn_iface = run_cmd(
@@ -661,7 +660,7 @@ def main(stdscr):
                     if len(servers) > 1:
                         servers.pop(selected_idx)
                         if selected_idx >= len(servers):
-                            selected_idx = len(servers) - 1
+                            len(servers) - 1
         elif key == curses.KEY_MOUSE:
             try:
                 _, x, y, z, bstate = curses.getmouse()
