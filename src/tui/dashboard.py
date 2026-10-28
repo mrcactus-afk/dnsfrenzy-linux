@@ -16,7 +16,7 @@ def load_json(path, default=None):
     if default is None:
         default = {}
     try:
-        with open(path, "r") as f:
+        with open(path) as f:
             return json.load(f)
     except:
         return default
